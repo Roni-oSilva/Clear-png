@@ -1,5 +1,5 @@
 fastapi>=0.115
-uvicorn[standard]>=0.30
+gunicorn core.wsgi:application
 python-multipart>=0.0.9
 pillow>=10.3
 rembg[cpu]>=2.0.57
