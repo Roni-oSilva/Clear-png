@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="pt">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ClearCut — Remover fundo com IA</title>
+  <meta name="description" content="Remova o fundo de imagens em segundos com IA. Processamento privado, ficheiros apagados automaticamente." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M9 22 L16 9 L23 22 Z' fill='white'/%3E%3C/svg%3E" />
+
+  <!-- Aplica o tema antes do render (sem "flash") -->
+  <script>
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('clearcut-theme'); } catch (e) {}
+      if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind (CDN para desenvolvimento; ver README para build de produção) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    if (window.tailwind) tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'] },
+          colors: { brand: { 50: '#eef2ff', 100: '#e0e7ff', 400: '#818cf8', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca' } },
+          boxShadow: { soft: '0 1px 2px rgba(15,23,42,.04), 0 8px 24px -8px rgba(15,23,42,.10)' },
+        },
+      },
+    };
+  </script>
+  <link rel="stylesheet" href="assets/styles.css" />
+</head>
+
+<body class="min-h-screen bg-slate-50 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100 font-sans selection:bg-brand-500/20">
+  <!-- Fundo decorativo -->
+  <div aria-hidden="true" class="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+    <div class="tech-grid absolute inset-0"></div>
+    <div class="absolute -top-40 left-[15%] h-[480px] w-[640px] rounded-full bg-brand-500/15 blur-3xl"></div>
+    <div class="absolute bottom-[-10rem] right-[5%] h-[420px] w-[520px] rounded-full bg-cyan-400/10 blur-3xl"></div>
+  </div>
+
+  <!-- Overlay de arrastar em toda a janela -->
+  <div id="drag-overlay" class="pointer-events-none fixed inset-0 z-50 hidden items-center justify-center bg-brand-600/10 backdrop-blur-sm">
+    <div class="rounded-3xl border-2 border-dashed border-brand-500 bg-white/90 px-10 py-8 text-center shadow-2xl dark:bg-slate-900/90 animate-pop">
+      <p class="text-lg font-semibold text-brand-600 dark:text-brand-400">Solte até <span data-max-files>5</span> imagens para remover o fundo</p>
+    </div>
+  </div>
+
+  <!-- Cabeçalho -->
+  <header class="mx-auto flex max-w-6xl items-center justify-between px-4 py-5 sm:px-6">
+    <a href="./" class="flex items-center gap-2.5 font-bold tracking-tight">
+      <span class="grid h-9 w-9 place-items-center rounded-xl bg-brand-600 text-white shadow-soft">
+        <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v12a3 3 0 0 0 3 3h12"/><path d="M18 21V9a3 3 0 0 0-3-3H3"/></svg>
+      </span>
+      <span class="text-lg">ClearCut</span>
+    </a>
+    <div class="flex items-center gap-3">
+      <span id="server-status" class="hidden items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 sm:inline-flex">
+        <span id="server-dot" class="h-2 w-2 rounded-full bg-slate-400"></span>
+        <span id="server-text">A verificar…</span>
+      </span>
+      <button id="theme-toggle" type="button" aria-label="Alternar tema claro/escuro"
+        class="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:text-slate-900 hover:shadow-soft dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:text-white">
+        <svg class="h-5 w-5 dark:hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+        <svg class="hidden h-5 w-5 dark:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-6xl px-4 pb-16 sm:px-6">
+    <div id="layout" class="layout grid items-center gap-8 pt-2 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] lg:gap-x-14 lg:gap-y-2 lg:pt-6">
+      <!-- Hero + visual interativo -->
+      <section id="hero" class="relative text-center lg:col-start-1 lg:row-start-1 lg:self-end lg:text-left">
+        <span class="inline-flex items-center gap-2 rounded-full border border-brand-500/20 bg-brand-500/10 px-3 py-1 font-mono text-[11px] font-semibold uppercase tracking-wider text-brand-700 dark:text-brand-400">
+          <span class="relative flex h-2 w-2"><span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span><span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span></span>
+          Neural engine · local · privado
+        </span>
+        <h1 class="mt-5 text-4xl font-extrabold leading-[1.05] tracking-tight sm:text-5xl xl:text-6xl">
+          Remova o fundo<br class="hidden sm:block" /> com <span class="text-gradient">precisão de IA</span>
+        </h1>
+        <p class="mx-auto mt-4 max-w-md text-base text-slate-600 dark:text-slate-400 lg:mx-0">Segmentação neural que separa cabelo, bordas e detalhes em segundos. Sem registo, sem marca d'água — nada fica guardado.</p>
+
+      </section>
+
+      <!-- Visual 3D interativo -->
+      <div id="hero-visual" class="order-last lg:order-none lg:col-start-1 lg:row-start-2">
+        <div class="orb-wrap relative mx-auto aspect-square w-full max-w-[300px] sm:max-w-[400px] lg:mx-0">
+          <canvas id="orb" class="absolute inset-0 h-full w-full cursor-grab active:cursor-grabbing" aria-label="Visualização 3D interativa: arraste para rodar"></canvas>
+          <div class="stat-chip left-0 top-[12%]" style="--d:0s"><span class="stat-k">Modelo</span><span class="stat-v">IS-Net · ONNX</span></div>
+          <div class="stat-chip right-0 top-[38%]" style="--d:1.2s"><span class="stat-k">Latência</span><span class="stat-v" id="stat-latency">~2 s</span></div>
+          <div class="stat-chip bottom-[10%] left-[8%]" style="--d:2.4s"><span class="stat-k">Ficheiros retidos</span><span class="stat-v">0</span></div>
+          <p id="orb-hint" class="pointer-events-none absolute bottom-0 right-2 font-mono text-[10px] uppercase tracking-widest text-slate-400">⟲ arraste para rodar</p>
+        </div>
+      </div>
+
+      <!-- Caixa principal (lado direito) -->
+      <section id="card" class="glow-card relative rounded-3xl p-4 sm:p-6 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+        <div class="card-spot" aria-hidden="true"></div>
+
+      <!-- ===== VISTA: UPLOAD ===== -->
+      <div id="view-upload" class="view">
+        <label id="dropzone" for="file-input" tabindex="0" role="button" aria-describedby="dz-hint"
+          class="dropzone group relative flex min-h-[340px] cursor-pointer flex-col items-center justify-center gap-4 overflow-hidden rounded-2xl border border-dashed border-slate-300 bg-slate-50/60 p-8 text-center hover:border-brand-400 focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-500/30 dark:border-slate-700 dark:bg-slate-950/40 dark:hover:border-brand-500">
+          <span class="dz-corner tl"></span><span class="dz-corner tr"></span><span class="dz-corner bl"></span><span class="dz-corner br"></span>
+          <span class="dz-scan" aria-hidden="true"></span>
+          <div class="dz-icon grid h-16 w-16 place-items-center rounded-2xl bg-white text-brand-600 shadow-soft transition-transform duration-300 group-hover:-translate-y-1 dark:bg-slate-800 dark:text-brand-400">
+            <svg class="h-8 w-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m0 0-4 4m4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+          </div>
+          <div>
+            <p class="text-lg font-semibold"><span class="dz-title">Arraste até <span data-max-files>5</span> imagens para aqui</span></p>
+            <p id="dz-hint" class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              ou <span class="font-semibold text-brand-600 underline-offset-2 group-hover:underline dark:text-brand-400">escolha ficheiros</span>
+              · cole com <kbd class="kbd">Ctrl</kbd> + <kbd class="kbd">V</kbd>
+            </p>
+          </div>
+          <div class="flex flex-wrap items-center justify-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+            <span class="chip">PNG</span><span class="chip">JPG</span><span class="chip">WebP</span>
+            <span class="chip">Até <span data-max-mb>100</span> MB cada</span>
+            <span class="chip chip-brand">⚡ <span data-max-files>5</span> de uma vez</span>
+          </div>
+          <input id="file-input" type="file" accept="image/png,image/jpeg,image/webp" multiple class="sr-only" />
+        </label>
+
+        <div class="mt-4 flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+          <label class="flex cursor-pointer items-center gap-3 text-sm">
+            <span class="relative inline-flex">
+              <input id="refine-toggle" type="checkbox" class="peer sr-only" />
+              <span class="h-6 w-11 rounded-full bg-slate-200 transition peer-checked:bg-brand-600 peer-focus-visible:ring-4 peer-focus-visible:ring-brand-500/30 dark:bg-slate-700"></span>
+              <span class="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition peer-checked:translate-x-5"></span>
+            </span>
+            <span><span class="font-medium">Refinar bordas finas</span> <span class="text-slate-500 dark:text-slate-400">— cabelo e pelo (mais lento)</span></span>
+          </label>
+          <p class="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+            Ficheiros apagados após o processamento
+          </p>
+        </div>
+      </div>
+
+      <!-- ===== VISTA: PROCESSAMENTO ===== -->
+      <div id="view-processing" class="view hidden" aria-live="polite">
+        <div class="flex flex-col items-center gap-6 py-6 sm:py-10">
+          <div class="relative h-48 w-48 overflow-hidden rounded-2xl bg-slate-100 shadow-soft dark:bg-slate-800 sm:h-56 sm:w-56">
+            <img id="processing-preview" alt="" class="h-full w-full object-cover" />
+            <div class="scan-line"></div>
+          </div>
+
+          <div class="w-full max-w-md">
+            <div class="mb-2 flex items-baseline justify-between gap-4">
+              <p id="status-text" class="text-sm font-medium">A carregar imagem…</p>
+              <p id="progress-pct" class="tabular-nums text-sm font-semibold text-brand-600 dark:text-brand-400">0%</p>
+            </div>
+            <div class="h-2.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress-track">
+              <div id="progress-bar" class="progress-bar h-full w-0 rounded-full bg-gradient-to-r from-brand-500 to-violet-500"></div>
+            </div>
+            <ol class="mt-5 grid grid-cols-3 gap-2 text-center text-xs" id="steps">
+              <li class="step" data-step="1"><span class="step-dot"></span>Carregar</li>
+              <li class="step" data-step="2"><span class="step-dot"></span>Remover fundo</li>
+              <li class="step" data-step="3"><span class="step-dot"></span>Finalizar</li>
+            </ol>
+          </div>
+
+          <button id="cancel-btn" type="button" class="text-sm font-medium text-slate-500 transition hover:text-slate-900 dark:text-slate-400 dark:hover:text-white">Cancelar</button>
+        </div>
+      </div>
+
+      <!-- ===== VISTA: LOTE (até 5 imagens) ===== -->
+      <div id="view-batch" class="view hidden">
+        <div class="flex items-end justify-between gap-3">
+          <div>
+            <p class="font-mono text-[11px] font-semibold uppercase tracking-wider text-brand-600 dark:text-brand-400">Processamento em lote</p>
+            <p class="mt-0.5 text-lg font-bold"><span id="batch-count">0</span> imagens</p>
+            <p id="batch-summary" class="text-xs text-slate-500 dark:text-slate-400">A preparar…</p>
+          </div>
+          <p id="batch-pct" class="font-mono text-2xl font-bold tabular-nums text-brand-600 dark:text-brand-400">0%</p>
+        </div>
+        <div class="mt-3 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+          <div id="batch-bar" class="progress-bar h-full w-0 rounded-full bg-gradient-to-r from-brand-500 via-violet-500 to-cyan-400"></div>
+        </div>
+
+        <ul id="batch-list" class="mt-4 space-y-2" aria-live="polite"></ul>
+
+        <div class="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-800/30">
+          <div class="flex items-center gap-2" role="radiogroup" aria-label="Cor de fundo do lote">
+            <button type="button" class="swatch checker is-active" data-bg="transparent" role="radio" aria-checked="true" title="Transparente" aria-label="Transparente"></button>
+            <button type="button" class="swatch" data-bg="#ffffff" style="background:#fff" role="radio" aria-checked="false" title="Branco" aria-label="Branco"></button>
+            <button type="button" class="swatch" data-bg="#000000" style="background:#000" role="radio" aria-checked="false" title="Preto" aria-label="Preto"></button>
+            <label class="swatch swatch-custom relative cursor-pointer" title="Cor personalizada">
+              <input type="color" value="#4f46e5" class="custom-color absolute inset-0 h-full w-full cursor-pointer opacity-0" aria-label="Cor personalizada" />
+            </label>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button id="batch-cancel" type="button" class="btn-secondary">Cancelar</button>
+            <button id="batch-new" type="button" class="btn-secondary hidden">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+              Nova seleção
+            </button>
+            <button id="batch-zip" type="button" class="btn-primary" disabled>
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12m0 0 5-5m-5 5-5-5M4 20h16"/></svg>
+              Descarregar ZIP
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== VISTA: RESULTADO ===== -->
+      <div id="view-result" class="view hidden">
+        <!-- Barra superior -->
+        <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div class="flex flex-wrap items-center gap-2">
+          <button id="back-to-batch" type="button" class="btn-secondary hidden !py-2">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+            Lote
+          </button>
+          <div class="inline-flex rounded-xl bg-slate-100 p-1 text-sm font-medium dark:bg-slate-800" role="tablist" aria-label="Modo de visualização">
+            <button type="button" class="seg-btn is-active" data-view="slider" role="tab" aria-selected="true">Comparar</button>
+            <button type="button" class="seg-btn" data-view="side" role="tab" aria-selected="false">Lado a lado</button>
+            <button type="button" class="seg-btn" data-view="result" role="tab" aria-selected="false">Só resultado</button>
+          </div>
+          </div>
+          <p id="result-meta" class="text-xs text-slate-500 dark:text-slate-400"></p>
+        </div>
+
+        <!-- Comparador (slider) -->
+        <div id="stage-slider" class="stage">
+          <div id="compare" class="compare relative mx-auto w-full select-none overflow-hidden rounded-2xl" style="--split: 50%">
+            <div id="after-layer" class="bg-layer absolute inset-0 checker">
+              <img id="after-img" alt="Resultado sem fundo" class="absolute inset-0 h-full w-full object-contain" draggable="false" />
+            </div>
+            <div class="before-layer absolute inset-0 checker">
+              <img id="before-img" alt="Imagem original" class="absolute inset-0 h-full w-full object-contain" draggable="false" />
+            </div>
+            <span class="badge left-3">Antes</span>
+            <span class="badge right-3">Depois</span>
+            <div class="divider">
+              <button id="compare-handle" type="button" role="slider" aria-label="Comparar antes e depois" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50" class="handle">
+                <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6-6 6 6 6M15 6l6 6-6 6"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Lado a lado -->
+        <div id="stage-side" class="stage hidden">
+          <div class="grid gap-3 sm:grid-cols-2">
+            <figure class="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">
+              <div class="checker aspect-square"><img id="side-before" alt="Original" class="h-full w-full object-contain" /></div>
+              <figcaption class="border-t border-slate-200 px-3 py-2 text-xs font-medium text-slate-500 dark:border-slate-800 dark:text-slate-400">Original</figcaption>
+            </figure>
+            <figure class="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">
+              <div class="bg-layer checker aspect-square"><img id="side-after" alt="Sem fundo" class="h-full w-full object-contain" /></div>
+              <figcaption class="border-t border-slate-200 px-3 py-2 text-xs font-medium text-slate-500 dark:border-slate-800 dark:text-slate-400">Sem fundo</figcaption>
+            </figure>
+          </div>
+        </div>
+
+        <!-- Só resultado -->
+        <div id="stage-result" class="stage hidden">
+          <div id="result-only" class="bg-layer checker mx-auto overflow-hidden rounded-2xl">
+            <img id="result-only-img" alt="Resultado sem fundo" class="h-full w-full object-contain" />
+          </div>
+        </div>
+
+        <!-- Ferramentas -->
+        <div class="mt-5 flex flex-col gap-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-800/30 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Fundo</p>
+            <div class="flex items-center gap-2" role="radiogroup" aria-label="Cor de fundo">
+              <button type="button" class="swatch checker is-active" data-bg="transparent" role="radio" aria-checked="true" title="Transparente" aria-label="Transparente"></button>
+              <button type="button" class="swatch" data-bg="#ffffff" style="background:#fff" role="radio" aria-checked="false" title="Branco" aria-label="Branco"></button>
+              <button type="button" class="swatch" data-bg="#000000" style="background:#000" role="radio" aria-checked="false" title="Preto" aria-label="Preto"></button>
+              <label class="swatch swatch-custom relative cursor-pointer" title="Cor personalizada">
+                <input type="color" value="#4f46e5" class="custom-color absolute inset-0 h-full w-full cursor-pointer opacity-0" aria-label="Cor personalizada" />
+              </label>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2">
+            <button id="new-btn" type="button" class="btn-secondary">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+              Nova imagem
+            </button>
+            <button id="copy-btn" type="button" class="btn-secondary" title="Copiar para a área de transferência">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+              Copiar
+            </button>
+            <button id="download-btn" type="button" class="btn-primary">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12m0 0 5-5m-5 5-5-5M4 20h16"/></svg>
+              Descarregar PNG HD
+            </button>
+          </div>
+        </div>
+      </div>
+      </section>
+    </div>
+
+    <!-- Destaques -->
+    <section class="mx-auto mt-10 grid max-w-4xl gap-4 sm:grid-cols-3">
+      <div class="feature"><p class="feature-title">⚡ Rápido</p><p class="feature-text">Modelo carregado em memória e reutilizado entre pedidos.</p></div>
+      <div class="feature"><p class="feature-title">🎯 Preciso</p><p class="feature-text">Segmentação IS-Net com refinamento opcional de bordas.</p></div>
+      <div class="feature"><p class="feature-title">🔒 Privado</p><p class="feature-text">Processado no seu servidor; ficheiros apagados automaticamente.</p></div>
+    </section>
+  </main>
+
+  <footer class="pb-8 text-center text-xs text-slate-500 dark:text-slate-500">
+    Atalhos: <kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">V</kbd> colar · <kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">S</kbd> descarregar · <kbd class="kbd">Esc</kbd> recomeçar
+  </footer>
+
+  <!-- Toasts -->
+  <div id="toasts" class="fixed bottom-4 left-1/2 z-50 flex w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 flex-col gap-2 sm:left-auto sm:right-4 sm:translate-x-0" aria-live="assertive"></div>
+
+  <script>
+    // Altere se o backend estiver noutro domínio/porta (ex.: 'http://localhost:8000')
+    window.APP_CONFIG = { apiBase: '' };
+  </script>
+  <script src="assets/orb.js" defer></script>
+  <script src="assets/app.js" defer></script>
+</body>
+</html>
