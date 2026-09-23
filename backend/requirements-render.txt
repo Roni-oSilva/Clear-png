@@ -1,0 +1,8 @@
+# Dependências mínimas para o motor "lite" (Render gratuito / 512 MB de RAM).
+# Sem rembg, OpenCV, SciPy, scikit-image nem numba.
+fastapi>=0.115
+uvicorn>=0.30
+python-multipart>=0.0.9
+pillow>=10.3
+numpy>=1.26
+onnxruntime>=1.17
